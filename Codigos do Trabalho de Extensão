@@ -1,0 +1,659 @@
+Project structure
+
+costa-verde-app/
+├─ App.tsx
+├─ package.json
+├─ tsconfig.json
+├─ babel.config.js
+├─ src/
+│  ├─ navigation/
+│  │  └─ index.tsx
+│  ├─ screens/
+│  │  ├─ RegisterDemandScreen.tsx
+│  │  ├─ DemandListScreen.tsx
+│  │  └─ MonthlyReportScreen.tsx
+│  ├─ components/
+│  │  ├─ DemandItem.tsx
+│  │  └─ StatusBadge.tsx
+│  ├─ context/
+│  │  └─ DemandContext.tsx
+│  ├─ storage/
+│  │  └─ demandStorage.ts
+│  ├─ utils/
+│  │  └─ types.ts
+│  └─ theme.ts
+
+package.json
+{
+  "name": "costa-verde-app",
+  "version": "1.0.0",
+  "main": "node_modules/expo/AppEntry.js",
+  "private": true,
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^1.23.1",
+    "@react-navigation/native": "^6.1.9",
+    "@react-navigation/native-stack": "^6.9.19",
+    "expo": "^51.0.0",
+    "expo-status-bar": "~1.12.1",
+    "react": "18.2.0",
+    "react-native": "0.75.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/react": "^18.2.45",
+    "@types/react-native": "^0.73.0"
+  }
+}
+
+tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES6",
+    "module": "ESNext",
+    "jsx": "react",
+    "strict": true,
+    "moduleResolution": "Node",
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  }
+}
+
+babel.config.js
+module.exports = function (api) {
+  api.cache(true);
+  return {
+    presets: ['babel-preset-expo']
+  };
+};
+
+src/utils/types.ts
+export type DemandStatus = 'Concluída' | 'Em Andamento' | 'Pendente';
+
+export type DemandArea =
+  | 'Infraestrutura'
+  | 'Segurança'
+  | 'Saneamento'
+  | 'Iluminação'
+  | 'Lazer';
+
+export interface Demand {
+  id: string;
+  area: DemandArea;
+  description: string;
+  address: string;
+  status: DemandStatus;
+  dateISO: string; // e.g. '2025-04-25'
+}
+
+src/theme.ts
+export const colors = {
+  bg: '#FFFFFF',
+  text: '#111111',
+  muted: '#666666',
+  border: '#E5E7EB',
+  primary: '#2563EB',
+  success: '#16A34A',
+  warning: '#F59E0B',
+  danger: '#DC2626',
+  card: '#F9FAFB'
+};
+
+export const spacing = {
+  xs: 6,
+  sm: 10,
+  md: 14,
+  lg: 18,
+  xl: 24
+};
+
+export const radius = {
+  sm: 8,
+  md: 12,
+  lg: 16
+};
+
+src/storage/demandStorage.ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Demand } from '@/utils/types';
+
+const KEY = '@costa_verde_demands';
+
+export async function loadDemands(): Promise<Demand[]> {
+  const raw = await AsyncStorage.getItem(KEY);
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as Demand[];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveDemands(demands: Demand[]) {
+  await AsyncStorage.setItem(KEY, JSON.stringify(demands));
+}
+
+src/context/DemandContext.tsx
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { loadDemands, saveDemands } from '@/storage/demandStorage';
+import { Demand, DemandStatus } from '@/utils/types';
+
+type DemandContextValue = {
+  demands: Demand[];
+  addDemand: (d: Demand) => void;
+  updateStatus: (id: string, status: DemandStatus) => void;
+  removeDemand: (id: string) => void;
+  refresh: () => Promise<void>;
+};
+
+const DemandContext = createContext<DemandContextValue | undefined>(undefined);
+
+export const DemandProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [demands, setDemands] = useState<Demand[]>([]);
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  useEffect(() => {
+    saveDemands(demands);
+  }, [demands]);
+
+  async function refresh() {
+    const stored = await loadDemands();
+    setDemands(stored);
+  }
+
+  function addDemand(d: Demand) {
+    setDemands(prev => [d, ...prev]);
+  }
+
+  function updateStatus(id: string, status: DemandStatus) {
+    setDemands(prev => prev.map(d => (d.id === id ? { ...d, status } : d)));
+  }
+
+  function removeDemand(id: string) {
+    setDemands(prev => prev.filter(d => d.id !== id));
+  }
+
+  const value = useMemo(
+    () => ({ demands, addDemand, updateStatus, removeDemand, refresh }),
+    [demands]
+  );
+
+  return <DemandContext.Provider value={value}>{children}</DemandContext.Provider>;
+};
+
+export function useDemands() {
+  const ctx = useContext(DemandContext);
+  if (!ctx) throw new Error('useDemands must be used within DemandProvider');
+  return ctx;
+}
+
+src/components/StatusBadge.tsx
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { colors, radius, spacing } from '@/theme';
+import { DemandStatus } from '@/utils/types';
+
+type Props = { status: DemandStatus };
+
+export default function StatusBadge({ status }: Props) {
+  const bg =
+    status === 'Concluída'
+      ? colors.success
+      : status === 'Em Andamento'
+      ? colors.warning
+      : colors.danger;
+
+  return (
+    <View style={[styles.badge, { backgroundColor: bg }]}>
+      <Text style={styles.text}>{status}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  badge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm
+  },
+  text: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 12
+  }
+});
+
+src/components/DemandItem.tsx
+
+import React from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { colors, radius, spacing } from '@/theme';
+import StatusBadge from './StatusBadge';
+import { Demand } from '@/utils/types';
+
+type Props = {
+  demand: Demand;
+  onPress?: () => void;
+};
+
+export default function DemandItem({ demand, onPress }: Props) {
+  const date = new Date(demand.dateISO);
+  const dateStr = date.toLocaleDateString();
+
+  return (
+    <TouchableOpacity style={styles.card} onPress={onPress}>
+      <View style={styles.header}>
+        <Text style={styles.area}>{demand.area}</Text>
+        <StatusBadge status={demand.status} />
+      </View>
+      <Text style={styles.description}>{demand.description}</Text>
+      <Text style={styles.address}>{demand.address}</Text>
+      <Text style={styles.date}>Registrada em {dateStr}</Text>
+    </TouchableOpacity>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.md
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm
+  },
+  area: {
+    fontWeight: '700',
+    color: colors.text
+  },
+  description: {
+    color: colors.text,
+    marginBottom: 4
+  },
+  address: {
+    color: colors.muted,
+    marginBottom: spacing.sm
+  },
+  date: {
+    color: colors.muted,
+    fontSize: 12
+  }
+});
+
+src/screens/RegisterDemandScreen.tsx
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
+import { colors, radius, spacing } from '@/theme';
+import { Demand, DemandArea, DemandStatus } from '@/utils/types';
+import { useDemands } from '@/context/DemandContext';
+
+const AREAS: DemandArea[] = ['Infraestrutura', 'Segurança', 'Saneamento', 'Iluminação', 'Lazer'];
+const STATUSES: DemandStatus[] = ['Pendente', 'Em Andamento', 'Concluída'];
+
+export default function RegisterDemandScreen() {
+  const { addDemand } = useDemands();
+  const [area, setArea] = useState<DemandArea>('Infraestrutura');
+  const [description, setDescription] = useState('');
+  const [address, setAddress] = useState('');
+  const [status, setStatus] = useState<DemandStatus>('Pendente');
+
+  function handleSubmit() {
+    if (!description.trim() || !address.trim()) {
+      Alert.alert('Campos obrigatórios', 'Preencha a descrição e o endereço.');
+      return;
+    }
+    const demand: Demand = {
+      id: Math.random().toString(36).slice(2),
+      area,
+      description: description.trim(),
+      address: address.trim(),
+      status,
+      dateISO: new Date().toISOString().slice(0, 10)
+    };
+    addDemand(demand);
+    Alert.alert('Sucesso', 'Demanda cadastrada.');
+    setDescription('');
+    setAddress('');
+    setArea('Infraestrutura');
+    setStatus('Pendente');
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Cadastrar Nova Demanda</Text>
+
+      <Text style={styles.label}>Área</Text>
+      <View style={styles.row}>
+        {AREAS.map(a => (
+          <TouchableOpacity
+            key={a}
+            style={[styles.chip, area === a && styles.chipActive]}
+            onPress={() => setArea(a)}
+          >
+            <Text style={[styles.chipText, area === a && styles.chipTextActive]}>{a}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <Text style={styles.label}>Descrição da Demanda</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Ex.: Buracos na Rua Rio Verde"
+        value={description}
+        onChangeText={setDescription}
+      />
+
+      <Text style={styles.label}>Endereço</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Ex.: Rua Rio Verde, próximo à praça"
+        value={address}
+        onChangeText={setAddress}
+      />
+
+      <Text style={styles.label}>Status</Text>
+      <View style={styles.row}>
+        {STATUSES.map(s => (
+          <TouchableOpacity
+            key={s}
+            style={[styles.chip, status === s && styles.chipActive]}
+            onPress={() => setStatus(s)}
+          >
+            <Text style={[styles.chipText, status === s && styles.chipTextActive]}>{s}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <TouchableOpacity style={styles.submit} onPress={handleSubmit}>
+        <Text style={styles.submitText}>Cadastrar Demanda</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.bg, padding: spacing.lg },
+  title: { fontSize: 20, fontWeight: '700', marginBottom: spacing.md },
+  label: { fontWeight: '600', marginTop: spacing.md, marginBottom: spacing.xs, color: colors.text },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    backgroundColor: '#fff'
+  },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  chip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    backgroundColor: '#fff'
+  },
+  chipActive: { borderColor: colors.primary, backgroundColor: '#EFF6FF' },
+  chipText: { color: colors.text },
+  chipTextActive: { color: colors.primary, fontWeight: '700' },
+  submit: {
+    marginTop: spacing.xl,
+    backgroundColor: colors.success,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    alignItems: 'center'
+  },
+  submitText: { color: '#fff', fontWeight: '700' }
+});
+
+src/screens/DemandListScreen.tsx
+
+import React, { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import { colors, spacing } from '@/theme';
+import DemandItem from '@/components/DemandItem';
+import { useDemands } from '@/context/DemandContext';
+import { DemandStatus } from '@/utils/types';
+
+const FILTERS: (DemandStatus | 'Todos')[] = ['Todos', 'Pendente', 'Em Andamento', 'Concluída'];
+
+export default function DemandListScreen() {
+  const { demands } = useDemands();
+  const [filter, setFilter] = useState<(DemandStatus | 'Todos')>('Todos');
+
+  const filtered = useMemo(() => {
+    if (filter === 'Todos') return demands;
+    return demands.filter(d => d.status === filter);
+  }, [demands, filter]);
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Demandas da Comunidade</Text>
+
+      <View style={styles.filters}>
+        {FILTERS.map(f => (
+          <TouchableOpacity
+            key={f}
+            style={[styles.filterBtn, filter === f && styles.filterBtnActive]}
+            onPress={() => setFilter(f)}
+          >
+            <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>{f}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <FlatList
+        data={filtered}
+        keyExtractor={item => item.id}
+        contentContainerStyle={{ paddingBottom: 100 }}
+        renderItem={({ item }) => <DemandItem demand={item} />}
+        ListEmptyComponent={<Text style={styles.empty}>Nenhuma demanda.</Text>}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.bg, padding: spacing.lg },
+  title: { fontSize: 20, fontWeight: '700', marginBottom: spacing.md },
+  filters: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  filterBtn: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#fff'
+  },
+  filterBtnActive: { borderColor: colors.primary, backgroundColor: '#EFF6FF' },
+  filterText: { color: colors.text },
+  filterTextActive: { color: colors.primary, fontWeight: '700' },
+  empty: { color: colors.muted, marginTop: spacing.md }
+});
+
+src/screens/MonthlyReportScreen.tsx
+
+import React, { useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList } from 'react-native';
+import { colors, radius, spacing } from '@/theme';
+import { useDemands } from '@/context/DemandContext';
+import { Demand } from '@/utils/types';
+import DemandItem from '@/components/DemandItem';
+
+export default function MonthlyReportScreen() {
+  const { demands } = useDemands();
+
+  // Use current month for the report
+  const now = new Date();
+  const month = now.getMonth(); // 0-11
+  const year = now.getFullYear();
+
+  const monthDemands = useMemo(() => {
+    return demands.filter(d => {
+      const dt = new Date(d.dateISO);
+      return dt.getMonth() === month && dt.getFullYear() === year;
+    });
+  }, [demands, month, year]);
+
+  const summary = useMemo(() => {
+    const s = { Concluída: 0, 'Em Andamento': 0, Pendente: 0 };
+    monthDemands.forEach(d => {
+      s[d.status as keyof typeof s] += 1;
+    });
+    return s;
+  }, [monthDemands]);
+
+  const completed = useMemo(() => monthDemands.filter(d => d.status === 'Concluída'), [monthDemands]);
+
+  const monthName = now.toLocaleDateString('pt-BR', { month: 'long' });
+  const headerTitle = `${monthName.charAt(0).toUpperCase() + monthName.slice(1)} ${year}`;
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Relatório Mensal</Text>
+      <Text style={styles.subtitle}>{headerTitle}</Text>
+
+      <View style={styles.summaryRow}>
+        <View style={[styles.summaryBox, { backgroundColor: '#ECFDF5' }]}>
+          <Text style={styles.summaryNumber}>{summary.Concluída}</Text>
+          <Text style={styles.summaryLabel}>Concluídas</Text>
+        </View>
+        <View style={[styles.summaryBox, { backgroundColor: '#FEF3C7' }]}>
+          <Text style={styles.summaryNumber}>{summary['Em Andamento']}</Text>
+          <Text style={styles.summaryLabel}>Em Andamento</Text>
+        </View>
+        <View style={[styles.summaryBox, { backgroundColor: '#FEE2E2' }]}>
+          <Text style={styles.summaryNumber}>{summary.Pendente}</Text>
+          <Text style={styles.summaryLabel}>Pendentes</Text>
+        </View>
+      </View>
+
+      <Text style={styles.sectionTitle}>Demandas Concluídas</Text>
+      <FlatList
+        data={completed}
+        keyExtractor={(item: Demand) => item.id}
+        renderItem={({ item }) => <DemandItem demand={item} />}
+        ListEmptyComponent={<Text style={styles.empty}>Nenhuma demanda concluída neste mês.</Text>}
+        contentContainerStyle={{ paddingBottom: 120 }}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.bg, padding: spacing.lg },
+  title: { fontSize: 20, fontWeight: '700' },
+  subtitle: { color: colors.muted, marginBottom: spacing.lg },
+  summaryRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
+  summaryBox: {
+    flex: 1,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center'
+  },
+  summaryNumber: { fontSize: 24, fontWeight: '700', color: colors.text },
+  summaryLabel: { color: colors.muted },
+  sectionTitle: { fontWeight: '700', marginBottom: spacing.md },
+  empty: { color: colors.muted }
+});
+
+src/navigation/index.tsx
+
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import RegisterDemandScreen from '@/screens/RegisterDemandScreen';
+import DemandListScreen from '@/screens/DemandListScreen';
+import MonthlyReportScreen from '@/screens/MonthlyReportScreen';
+
+export type RootStackParamList = {
+  DemandList: undefined;
+  RegisterDemand: undefined;
+  MonthlyReport: undefined;
+};
+
+const Stack = createNativeStackNavigator<RootStackParamList>();
+
+export default function RootNavigation() {
+  return (
+    <NavigationContainer>
+      <Stack.Navigator>
+        <Stack.Screen
+          name="DemandList"
+          component={DemandListScreen}
+          options={{
+            title: 'Demandas',
+            headerRight: () => null
+          }}
+        />
+        <Stack.Screen
+          name="RegisterDemand"
+          component={RegisterDemandScreen}
+          options={{ title: 'Cadastrar' }}
+        />
+        <Stack.Screen
+          name="MonthlyReport"
+          component={MonthlyReportScreen}
+          options={{ title: 'Relatório' }}
+        />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
+App.tsx
+
+import React from 'react';
+import { SafeAreaView, StatusBar, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import RootNavigation from '@/navigation';
+import { DemandProvider } from '@/context/DemandContext';
+import { colors, spacing } from '@/theme';
+import { useNavigation } from '@react-navigation/native';
+import { RootStackParamList } from '@/navigation';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+
+function HeaderActions() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  return (
+    <View style={styles.header}>
+      <Text style={styles.headerTitle}>Associação Costa Verde</Text>
+      <View style={styles.actions}>
+        <TouchableOpacity
+          style={styles.actionBtn}
+          onPress={() => navigation.navigate('DemandList')}
+        >
+          <Text style={styles.actionText}>Demandas</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.actionBtn}
+          onPress={() => navigation.navigate('RegisterDemand')}
+        >
+          <Text style={styles.actionText}>Cadastrar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.actionBtn}
+          onPress={() => navigation.navigate('MonthlyReport')}
+
+
+
+
+
+
